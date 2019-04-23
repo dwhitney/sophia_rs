@@ -1,13 +1,72 @@
-use ::std::borrow::Borrow;
+//! Working version of the code proposed in issue 5
 
-use ::sophia::error::Never;
-use ::sophia::graph::Graph;
-use ::sophia::graph::inmem::FastGraph;
-use ::sophia::ns::rdf;
-use ::sophia::parsers::nt;
-use ::sophia::term::{StaticTerm, Term};
-use ::sophia::triple::Triple;
-use ::sophia::streams::*;
+pub trait FromGraph<T, G, E>: Sized
+where
+    T: Borrow<str>,
+    G: for <'x> Graph<'x, Error=E>,
+    E: CoercibleWith<Never>,
+    E: CoercibleWith<SophiaError>,
+    MyError: From<E>
+{
+    fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self>;
+}
+
+
+
+#[derive(Debug, Clone, Copy)]
+struct A {
+    value: i32,
+}
+
+impl<T, G, E> FromGraph<T, G, E> for A
+where
+    T: Borrow<str>,
+    G: for <'x> Graph<'x, Error=E>,
+    E: CoercibleWith<Never>,
+    E: CoercibleWith<SophiaError>,
+    MyError: From<E>
+{
+    fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self> {
+        let t_value = graph.iter_for_sp(s, &rdf::value).last().ok_or(MyError{})??;
+        let value = t_value.o().value().parse::<i32>()?;
+        Ok(A { value })
+    }
+}
+
+
+
+#[derive(Debug, Clone, Copy)]
+struct B {
+    a: A,
+    value: i32,
+}
+
+impl<T, G, E> FromGraph<T, G, E> for B
+where
+    T: Borrow<str>,
+    G: for <'x> Graph<'x, Error=E>,
+    E: CoercibleWith<Never>,
+    E: CoercibleWith<SophiaError>,
+    MyError: From<E>
+{
+    fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self> {
+        let t_a = graph.iter_for_sp(s, &HAS_A).last().ok_or(MyError{})??;
+        let a = A::from_graph(t_a.o(), graph)?;
+
+        let t_value = graph.iter_for_sp(s, &rdf::value).last().ok_or(MyError{})??;
+        let value = t_value.o().value().parse::<i32>()?;
+        Ok(B { a, value })
+    }
+}
+
+fn main() {
+    let mut g = FastGraph::new();
+    nt::parse_str(SRC).in_graph(&mut g).unwrap();
+
+    let b1 = B::from_graph(&EXD_B1, &g).unwrap();
+    dbg!(&b1.value);
+    dbg!(&b1.a.value);
+}
 
 static SRC: &'static str = r#"
 <http://ex.co/data/a1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex.co/ns/A>.
@@ -39,62 +98,15 @@ impl From<std::num::ParseIntError> for MyError {
 
 pub type MyResult<T> = Result<T, MyError>;
 
-pub trait FromGraph<'a, T, G>: Sized
-where
-    T: Borrow<str>,
-    G: Graph<'a>,
-    MyError: From<<G as Graph<'a>>::Error>,
-{
-    fn from_graph(s: &'a Term<T>, graph: &'a G) -> MyResult<Self>;
-}
 
-#[derive(Debug, Clone, Copy)]
-struct A {
-    value: i32,
-}
+use ::std::borrow::Borrow;
 
-impl<'a, T, G> FromGraph<'a, T, G> for A
-where
-    T: Borrow<str>,
-    G: Graph<'a>,
-    //MyError: From<<G as Graph<'a>>::Error>,
-{
-    fn from_graph(s: &'a Term<T>, graph: &'a G) -> MyResult<Self> {
-        let t_value = graph.iter_for_sp(s, &rdf::value).last().ok_or(MyError{})??;
-        let t_value = t_value.o();
-        let value = t_value.value().parse::<i32>()?;
-        Ok(A { value })
-    }
-}
+use ::sophia::error::{CoercibleWith, Never, Error as SophiaError};
+use ::sophia::graph::Graph;
+use ::sophia::graph::inmem::FastGraph;
+use ::sophia::ns::rdf;
+use ::sophia::parsers::nt;
+use ::sophia::term::{StaticTerm, Term};
+use ::sophia::triple::Triple;
+use ::sophia::streams::*;
 
-#[derive(Debug, Clone, Copy)]
-struct B {
-    a: A,
-    value: i32,
-}
-
-impl<'a, T, G> FromGraph<'a, T, G> for B
-where
-    T: Borrow<str>,
-    G: Graph<'a>,
-    //MyError: From<<G as Graph<'a>>::Error>,
-{
-    fn from_graph(s: &Term<T>, graph: &'a G) -> MyResult<Self> {
-        let t_a = graph.iter_for_sp(s, &HAS_A).last().ok_or(MyError{})??;
-        let t_a = t_a.o(); // here is where the error occures
-        let a = A::from_graph(t_a, graph)?;
-
-        let t_value = graph.iter_for_sp(s, &rdf::value).last().ok_or(MyError{})??;
-        let t_value = t_value.o();
-        let value = t_value.value().parse::<i32>()?;
-        Ok(B { a, value })
-    }
-}
-
-fn main() {
-    let mut g = FastGraph::new();
-    nt::parse_str(SRC).in_graph(&mut g).unwrap();
-    //dbg!(&g.iter().size_hint());
-    let a1 = A::from_graph(&EXD_A1, &g).unwrap();
-    dbg!(&a1.value);
-}
