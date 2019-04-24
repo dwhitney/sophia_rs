@@ -1,11 +1,44 @@
 //! Working version of the code proposed in issue 5
+//!
+//! NB: this section would be added to the documentation of Graph
+//! 
+//! # How to use `Graph` in a trait bound?
+//! 
+//! TL;DR: don't do it. Use `OwnedGraph` instead.
+//! 
+//! The lifetime parameter of `Graph` has a very specific semantics:
+//! it is the lifetime for which the graph can be borrowed when iterating over its triples.
+//! Since lifetime parameters in traits are [invariant](https://doc.rust-lang.org/nightly/nomicon/subtyping.html),
+//! a instance of `Graph<'a>` will only be usable with the *exact* lifetime `'a`,
+//! but not with a shorter lifetime, which is rather counter-intuitive.
+//! 
+//! In most situations, it is therefore more useful to use a 
+//! [Higher-Rank Trait Bounds](https://doc.rust-lang.org/nomicon/hrtb.html): 
+//! ```
+//!   G: for <'x> Graph<'x>
+//! ```
+//! which states "G implements `Graph<'x>` for *every* lifetime".
+//! 
+//! This kind of trait bound is quite unusual, so a trait alias is provided: 
+//! `OwnedGraph<E>` (where E is the associated error type) can be used instead.
+//! 
+//! NB: as the name `OwnedGraph` implies,
+//! the Higher-Ranked Type Bound requires that the trait is valid for *every* lifetime,
+//! so the graph can not borrow anything (which would restrict its lifetime).
+
+/// A trait alias for types which are appropriate as a graph's associate error type.
+pub trait GraphError: CoercibleWith<Never> + CoercibleWith<SophiaError> {}
+impl<E> GraphError for E where E: CoercibleWith<Never> + CoercibleWith<SophiaError> {}
+
+/// A convenient trait alias, easier to use than `Graph` itself.
+pub trait OwnedGraph<E>: for <'x> Graph<'x, Error=E> where E: GraphError {}
+impl<G, E> OwnedGraph<E> for G where G: for <'x> Graph<'x, Error=E>, E: GraphError {}
 
 pub trait FromGraph<T, G, E>: Sized
 where
     T: Borrow<str>,
-    G: for <'x> Graph<'x, Error=E>,
-    E: CoercibleWith<Never>,
-    E: CoercibleWith<SophiaError>,
+    G: OwnedGraph<E>,
+    E: GraphError,
     MyError: From<E>
 {
     fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self>;
@@ -21,9 +54,8 @@ struct A {
 impl<T, G, E> FromGraph<T, G, E> for A
 where
     T: Borrow<str>,
-    G: for <'x> Graph<'x, Error=E>,
-    E: CoercibleWith<Never>,
-    E: CoercibleWith<SophiaError>,
+    G: OwnedGraph<E>,
+    E: GraphError,
     MyError: From<E>
 {
     fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self> {
@@ -44,9 +76,8 @@ struct B {
 impl<T, G, E> FromGraph<T, G, E> for B
 where
     T: Borrow<str>,
-    G: for <'x> Graph<'x, Error=E>,
-    E: CoercibleWith<Never>,
-    E: CoercibleWith<SophiaError>,
+    G: OwnedGraph<E>,
+    E: GraphError,
     MyError: From<E>
 {
     fn from_graph(s: &Term<T>, graph: &G) -> MyResult<Self> {
